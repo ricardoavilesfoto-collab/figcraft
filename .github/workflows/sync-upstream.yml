@@ -1,0 +1,83 @@
+# Fork only (ricardoavilesfoto-collab/figcraft): keeps figma-compat on top of upstream main. Once a
+# day it replays this branch's own commits on storytold/figcraft's latest main, runs the format
+# crate's tests and pushes; the push runs figma-compat.yml, which builds and publishes figcraft-cli.
+# A conflict or a failing test opens an issue here and leaves the branch as it was.
+#
+# Needs the secret SYNC_TOKEN: a fine-grained token for this repository with "Contents" and
+# "Workflows" read/write (pushing commits that touch .github/workflows needs the second, and a push
+# made with the default token wouldn't start the build).
+name: sync-upstream
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: figma-compat
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Replay figma-compat on upstream main
+        id: rebase
+        shell: bash
+        run: |
+          git config user.name "figma-compat sync"
+          git config user.email "actions@users.noreply.github.com"
+          git remote add upstream https://github.com/storytold/figcraft.git
+          git fetch --quiet upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already on top of upstream main."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base=$(git merge-base HEAD upstream/main)
+          echo "Replaying $(git rev-list --count "$base"..HEAD) commits onto $(git rev-parse --short upstream/main)"
+          if ! git rebase --onto upstream/main "$base"; then
+            git rebase --abort || true
+            echo "reason=conflict" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: steps.rebase.outputs.changed == 'true'
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.rebase.outputs.changed == 'true'
+
+      - name: Tests
+        id: tests
+        if: steps.rebase.outputs.changed == 'true'
+        run: cargo test -p figcraft-format --locked
+
+      - name: Push
+        if: steps.rebase.outputs.changed == 'true'
+        run: git push --force-with-lease origin HEAD:figma-compat
+
+      - name: Report
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          title="Sync with upstream needs attention"
+          if [ -z "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[].number')" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --body "Replaying figma-compat on storytold/figcraft main failed (${{ steps.rebase.outputs.reason || 'tests' }}): ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. The branch was left as it was."
+          fi
