@@ -500,8 +500,17 @@ impl<'d> Exporter<'d> {
         defs.get(&key).copied()
     }
 
-    /// The main component a layer belongs to (itself when it is one).
+    /// The main component a layer belongs to (itself when it is one). A layer of an instance
+    /// mirrors its main's layer (`source`, through nested instances): that layer's component, so
+    /// the instance's layers refer to what the main's do.
     fn component_of(&self, n: &Node) -> Option<NodeId> {
+        let mut n = n;
+        for _ in 0..MAX_DEPTH {
+            match n.source.and_then(|s| self.doc.node(s)) {
+                Some(src) => n = src,
+                None => break,
+            }
+        }
         let mut cur = Some(n);
         for _ in 0..MAX_DEPTH {
             let c = cur?;
@@ -1923,7 +1932,8 @@ impl<'d> Exporter<'d> {
     /// variants share; written on the set, as the format keeps them.
     fn set_props(&mut self, set: &Node, f: &mut Fields) {
         let doc = self.doc;
-        let variants: Vec<&Node> = set.children.iter().filter_map(|c| doc.node(*c)).filter(|c| matches!(c.kind, NodeKind::Component { .. })).collect();
+        let variants: Vec<&Node> =
+            set.children.iter().filter_map(|c| doc.node(*c)).filter(|c| matches!(c.kind, NodeKind::Component { .. })).collect();
         let mut order: Vec<(String, Vec<String>)> = Vec::new();
         for v in &variants {
             for (prop, value) in variant_pairs(&v.name) {

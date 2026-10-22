@@ -63,6 +63,8 @@ jobs:
     needs: test
     runs-on: windows-latest
     timeout-minutes: 120
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -80,3 +82,15 @@ jobs:
           name: figcraft-cli-windows-x64
           path: target/release/figcraft-cli.exe
           if-no-files-found: error
+
+      # The latest release is what exportar-a-figma.ps1 downloads.
+      - name: Publish
+        if: github.ref == 'refs/heads/figma-compat'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="compat-$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}"
+          gh release create "$tag" target/release/figcraft-cli.exe --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "figcraft-cli (Figma compat) $tag" --latest \
+            --notes "figcraft-cli for Windows x64 built from figma-compat at $GITHUB_SHA: upstream main plus the .fig export fixes for Figma."
