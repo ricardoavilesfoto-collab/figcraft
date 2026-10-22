@@ -500,15 +500,27 @@ impl<'d> Exporter<'d> {
         defs.get(&key).copied()
     }
 
-    /// The main component a layer belongs to (itself when it is one). A layer of an instance
+    /// The main component a layer belongs to (itself when it is one). A layer inside an instance
     /// mirrors its main's layer (`source`, through nested instances): that layer's component, so
-    /// the instance's layers refer to what the main's do.
+    /// the instance's layers refer to what the main's do. An instance placed in a component is the
+    /// component's own layer (its `source` is its main, which it doesn't belong to).
     fn component_of(&self, n: &Node) -> Option<NodeId> {
+        let in_instance = |x: &Node| {
+            let mut p = x.parent.and_then(|p| self.doc.node(p));
+            for _ in 0..MAX_DEPTH {
+                match p {
+                    Some(a) if matches!(a.kind, NodeKind::Instance { .. }) => return true,
+                    Some(a) => p = a.parent.and_then(|q| self.doc.node(q)),
+                    None => return false,
+                }
+            }
+            false
+        };
         let mut n = n;
         for _ in 0..MAX_DEPTH {
             match n.source.and_then(|s| self.doc.node(s)) {
-                Some(src) => n = src,
-                None => break,
+                Some(src) if in_instance(n) => n = src,
+                _ => break,
             }
         }
         let mut cur = Some(n);

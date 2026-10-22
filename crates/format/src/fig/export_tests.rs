@@ -1185,6 +1185,8 @@ fn set_with_properties() -> (Document, NodeId) {
     }
     let mut doc = Document::new("File");
     let page = doc.first_page().unwrap();
+    let glyph = doc.create(page, NodeKind::Component { description: String::new(), props: BTreeMap::new() }, "Glyph", 400.0, 0.0, 16.0, 16.0).unwrap();
+    doc.create(glyph, NodeKind::Rectangle, "Shape", 0.0, 0.0, 16.0, 16.0).unwrap();
     let set = doc.create(page, NodeKind::ComponentSet { description: String::new() }, "Button", 0.0, 0.0, 300.0, 120.0).unwrap();
     let mut variants = Vec::new();
     for (i, name) in ["Size=Small", "Size=Large"].into_iter().enumerate() {
@@ -1195,8 +1197,12 @@ fn set_with_properties() -> (Document, NodeId) {
         let v = doc.create(set, NodeKind::Component { description: String::new(), props }, name, 0.0, 60.0 * i as f64, 120.0, 40.0).unwrap();
         let label = doc.create(v, NodeKind::Text(TextData::new("Button")), "Label", 0.0, 0.0, 60.0, 20.0).unwrap();
         doc.node_mut(label).unwrap().prop_refs.insert("characters".into(), "Label".into());
-        let icon = doc.create(v, NodeKind::Rectangle, "Icon", 70.0, 0.0, 16.0, 16.0).unwrap();
-        doc.node_mut(icon).unwrap().prop_refs.insert("visible".into(), "Show icon".into());
+        // The icon is an instance placed in the variant: like the editor's, its `source` is its
+        // main, which the binding doesn't belong to.
+        let icon = doc.create(v, NodeKind::Instance { component: glyph, props: BTreeMap::new() }, "Icon", 70.0, 0.0, 16.0, 16.0).unwrap();
+        let n = doc.node_mut(icon).unwrap();
+        n.source = Some(glyph);
+        n.prop_refs.insert("visible".into(), "Show icon".into());
         variants.push(v);
     }
     let large = variants[1];
