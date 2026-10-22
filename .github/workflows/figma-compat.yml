@@ -1,0 +1,82 @@
+# Fork only (ricardoavilesfoto-collab/figcraft): checks the figma-compat branch, which makes the
+# .fig export open in Figma, and builds figcraft-cli for Windows. Not part of upstream PRs.
+name: figma-compat
+
+on:
+  push:
+    branches: [figma-compat]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+concurrency:
+  group: figma-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: format crate (fmt, clippy, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+
+      # No local toolchain on the author's machine: rustfmt runs here and its changes come back as
+      # an artifact (fmt.patch) to apply, instead of failing the run.
+      - name: Format
+        shell: bash
+        run: |
+          cargo fmt --all
+          git diff > fmt.patch
+          if [ -s fmt.patch ]; then echo "::warning::rustfmt changed files; apply fmt.patch"; cat fmt.patch; fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fmt-patch
+          path: fmt.patch
+          if-no-files-found: ignore
+
+      - name: Clippy
+        run: cargo clippy -p figcraft-format --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test -p figcraft-format --locked
+
+  windows:
+    name: figcraft-cli (Windows x64)
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+
+      - name: Build
+        run: cargo build --release -p figcraft-cli --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: figcraft-cli-windows-x64
+          path: target/release/figcraft-cli.exe
+          if-no-files-found: error
